@@ -1,0 +1,296 @@
+<html>
+	<head>
+		<title>MQTT Dashboard</title>
+		<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.0/jquery.min.js"></script>
+		<link rel="stylesheet" href="https://ajax.googleapis.com/ajax/libs/jqueryui/1.11.4/themes/smoothness/jquery-ui.css">
+		<script src="https://ajax.googleapis.com/ajax/libs/jqueryui/1.11.4/jquery-ui.min.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
+		<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+<script>
+$(document).ready(function()
+{
+	var aTopicList = [];
+	aTopicList[0]  = {'topic':'/superstar/home/eden/temp/cpu'     , 'name':'CPU Temperature'    , 'category':'CPU'    , 'type':'float', 'unit':'&deg;C'};
+	aTopicList[1]  = {'topic':'/superstar/home/eden/tx_bytes/eth0', 'name':'Network TX Bytes'   , 'category':'Network', 'type':'int'  , 'unit':'byte'};
+	aTopicList[2]  = {'topic':'/superstar/home/eden/rx_bytes/eth0', 'name':'Network RX Bytes'   , 'category':'Network', 'type':'int'  , 'unit':'byte'};
+	aTopicList[3]  = {'topic':'/superstar/home/eden/freq/cpu'     , 'name':'CPU Frequency'      , 'category':'CPU'    , 'type':'int'  , 'unit':'Hz'};
+	aTopicList[4]  = {'topic':'/superstar/home/eden/loadavg/1m'   , 'name':'Load Average - 1m'  , 'category':'Load'   , 'type':'float', 'unit':'unit'};
+	aTopicList[5]  = {'topic':'/superstar/home/eden/loadavg/5m'   , 'name':'Load Average - 5m'  , 'category':'Load'   , 'type':'float', 'unit':'unit'};
+	aTopicList[6]  = {'topic':'/superstar/home/eden/loadavg/15m'  , 'name':'Load Average - 15m' , 'category':'Load'   , 'type':'float', 'unit':'unit'};	
+	aTopicList[7]  = {'topic':'/superstar/home/eden/tx_speed/eth0', 'name':'TX Bytes Per Second', 'category':'Network', 'type':'float', 'unit':'Bps'};	
+	aTopicList[8]  = {'topic':'/superstar/home/eden/rx_speed/eth0', 'name':'RX Bytes Per Second', 'category':'Network', 'type':'float', 'unit':'Bps'};	
+	aTopicList[9]  = {'topic':'/superstar/home/eden/fsroot/free'  , 'name':'Root Free Space'    , 'category':'Disk'   , 'type':'int'  , 'unit':'byte'};	
+	aTopicList[10] = {'topic':'/superstar/home/eden/fs/root/free' , 'name':'Root Free Space'    , 'category':'Disk'   , 'type':'int'  , 'unit':'byte'};	
+	aTopicList[11] = {'topic':'/superstar/home/eden/written/md0'  , 'name':'Root Written Data'  , 'category':'Disk'   , 'type':'int'  , 'unit':'byte'};	
+	aTopicList[12] = {'topic':'/superstar/home/eden/read/md0'     , 'name':'Root Read Data'     , 'category':'Disk'   , 'type':'int'  , 'unit':'byte'};	
+	aTopicList[13] = {'topic':'/superstar/home/eden/write_speed/md0', 'name':'Root Write Speed' , 'category':'Disk'   , 'type':'int'  , 'unit':'byte'};	
+	aTopicList[14] = {'topic':'/superstar/home/eden/read_speed/md0' , 'name':'Root Read Speed'  , 'category':'Disk'   , 'type':'int'  , 'unit':'byte'};	
+	aTopicList[15] = {'topic':'/superstar/home/eden/delay/mqtt'   , 'name':'MQTT Publish Delay' , 'category':'System' , 'type':'int'  , 'unit':'sec'};	
+
+
+	var iCurrentGraph = -1;
+	var aTopicMap = {};
+	
+	google.charts.load('current', {packages: ['corechart', 'line']});
+	google.charts.setOnLoadCallback(graphInitObject);
+	var chartOptions = {hAxis: {title: 'Reading'}, vAxis: {title: 'Value'}, colors: ['#a52714']};
+
+	function graphInitObject()
+	{
+		chartImage = new google.visualization.LineChart(document.getElementById('chart_div'));
+	}
+	// --------------------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------
+	//    MQTT PART
+	// --------------------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------
+	// Create a client instance: Broker, Port, Websocket Path, Client ID
+	client = new Paho.MQTT.Client("iot.eclipse.org", Number(80), "/ws", "cc94c3fc-92c1-4ea7-813d-f4182009f03c");
+ 
+	// set callback handlers
+	client.onConnectionLost = function (responseObject)
+	{
+		console.log("Connection Lost: " + responseObject.errorMessage);
+	}
+
+	client.onMessageArrived = function (message)
+	{
+		console.log("Message Arrived: "+message.payloadString);
+		console.log(message.payloadString);
+		console.log("QoS:       " + message.qos);
+		console.log("Retained:  " + message.retained);
+		// Read Only, set if message might be a duplicate sent from broker
+		console.log("Duplicate: " + message.duplicate);
+		console.log("Topic:     " + message.destinationName);
+		
+		setReadingValue(message.destinationName, message.payloadString);
+	}
+
+	// Called when the connection is made
+	function onConnect()
+	{
+		console.log("Connected!");
+		
+		// Register to all queues we are interested in!
+		for ( iCounter = 0; iCounter < aTopicList.length; iCounter++)
+		{
+			client.subscribe(aTopicList[iCounter]['topic']);
+			aTopicMap[aTopicList[iCounter]['topic']] = iCounter;
+		}
+	}
+ 
+	// Connect the client, providing an onConnect callback
+	var rr = client.connect({
+		onSuccess: onConnect,
+		userName : "Username",
+		password : "password"
+	});
+	
+	var getFormattedValue = function(inValue, inUnit)
+	{
+		if (inUnit == 'byte' || inUnit == 'Hz' || inUnit == 'Bps')
+		{
+			iReturn  = inValue;
+			iCounter = 0;
+			aSiUnits = ['', 'k', 'M', 'G', 'T'];
+			while (iReturn > 1024 && iCounter < aSiUnits.length)
+			{
+				iCounter++;
+				iReturn = iReturn / 1024;
+			}
+
+			if (iReturn < 100)
+				iReturn = Math.round(iReturn*10) / 10;
+			else iReturn = Math.round(iReturn);
+			return iReturn + aSiUnits[iCounter];
+
+		} else if (inUnit == '&deg;C')
+		{
+			return Math.round(inValue * 10) / 10;
+		} else return inValue;
+	}
+	// --------------------------------------------------------------------------------------
+	// --------------------------------------------------------------------------------------
+	
+	var getCategoryContainer = function(inCategoryName)
+	{
+		if ( $( "#category_"+inCategoryName ).length )
+			return  $( "#category_"+inCategoryName );
+		
+		var divMainContainer = $('#pageSensorContainer');
+		var divCategoryContainer = $('<div>').attr("id","category_"+inCategoryName).addClass("category");
+		var divCategoryHeader = $('<div>').addClass("categoryHeader").append(inCategoryName);
+		
+		divCategoryContainer.append(divCategoryHeader);
+		divMainContainer.append(divCategoryContainer);
+		
+		return divCategoryContainer;
+	}
+
+	var getReadingValueContainer = function(inMeasurementObject)
+	{
+		inMeasurementName = inMeasurementObject['topic'].split('/').join('_');
+		if ( $( "#readingValue_" + inMeasurementName ).length )
+			return  $( "#readingValue_" + inMeasurementName );
+		
+		var divContainer = getCategoryContainer(inMeasurementObject['category']);
+		var divReadingContainer = $('<div>').addClass("readingBox").click(inMeasurementObject['topic'], onReadingClick);;
+		var divReadingTitle = $('<div>').attr('id',"readingTitle_"+inMeasurementName).addClass("readingTitle").html(inMeasurementObject['name']);
+		var divReadingValue = $('<div>').attr('id',"readingValue_"+inMeasurementName).addClass("readingValue").html("--");
+		var divReadingUnit  = $('<div>').addClass("readingUnit").html(inMeasurementObject['unit']);
+		
+		divReadingContainer.append(divReadingTitle);
+		divReadingContainer.append(divReadingValue);
+		divReadingContainer.append(divReadingUnit);
+		
+		divContainer.append(divReadingContainer);
+		
+		return divReadingValue;
+	}
+	
+	var setReadingValue = function(inTopicName, inValue)
+	{
+		if (inTopicName in aTopicMap)
+		{
+			// Get Position of entry in table
+			iTopicDetailsPos = aTopicMap[inTopicName];
+			
+			// Checking if value log exists
+			if (!('values' in aTopicList[iTopicDetailsPos]))
+				aTopicList[iTopicDetailsPos]['values'] = [];
+			
+			inValueTranslated = 0;
+			switch (aTopicList[iTopicDetailsPos]['type'])
+			{
+				case 'int':
+					inValueTranslated = parseInt(inValue,10);
+					break;
+				case 'float':
+					inValueTranslated = parseFloat(inValue);
+					break;
+				default:
+					inValueTranslated = inValue;
+			}
+
+			// Put value on log for later graphing
+			aTopicList[iTopicDetailsPos]['values'].push(inValueTranslated);
+			
+			// Update value on page
+			divValueContainer = getReadingValueContainer(aTopicList[iTopicDetailsPos]);
+			divValueContainer.html(getFormattedValue(inValueTranslated, aTopicList[iTopicDetailsPos]['unit']));
+			
+			// If we are graphing this item - update graph!
+			console.log("Active Graph: " + iCurrentGraph + " New Value For: " + iTopicDetailsPos);
+			if (iCurrentGraph == iTopicDetailsPos)
+			{
+				console.log("Online Graph Update!");
+				chartData.addRows([[aTopicList[iTopicDetailsPos]['values'].length-1, inValueTranslated]]);
+				chartImage.draw(chartData, chartOptions);
+			}
+
+			divValueContainer.effect( "highlight" );
+		} else console.log("No Topic in Map Cache");
+	}
+	
+	var onReadingClick = function(inEventData)
+	{
+		if (inEventData['data'] in aTopicMap)
+		{
+			iCurrentGraph = aTopicMap[inEventData['data']];
+			aReadingValues = aTopicList[iCurrentGraph]['values'];
+			
+			console.log(aTopicList[iCurrentGraph]);
+			if (aReadingValues.length > 0)
+			{
+				  chartData = new google.visualization.DataTable();
+				  chartData.addColumn('number', 'X');
+				  chartData.addColumn('number', aTopicList[iCurrentGraph]['unit']);
+				  
+				  
+				for (iCounter = 0; iCounter < aReadingValues.length; iCounter++)
+				{
+					chartData.addRows([[iCounter, aReadingValues[iCounter]]]);
+				}
+				chartImage.draw(chartData, chartOptions);
+			}
+		}
+	}
+	
+	console.log(aTopicList);
+});
+</script>
+<style>
+	div.category
+	{
+		-webkit-box-shadow: 10px 10px 5px 0px rgba(0,0,0,0.35);
+		-moz-box-shadow: 10px 10px 5px 0px rgba(0,0,0,0.35);
+		box-shadow: 10px 10px 5px 0px rgba(0,0,0,0.35);
+		margin-bottom: 20px;
+		border: 1px solid #A0A0A0;
+		padding-top:0px;
+		border-radius: 10px;
+		overflow: hidden;
+	}
+	
+	div.categoryHeader
+	{
+		padding-left: 10px;
+		border-bottom: 1px dashed #E0E0E0;
+		font-family: Verdana;
+		font-size: 14pt;
+		font-weight: bold;
+		color: #A0A0A0;
+		background-color: #A0A0A0;
+		color: #FFFFFF
+	}
+	
+	div.readingBox
+	{
+		border: 1px solid #A0A0A0;
+		width: 120px;
+		height: 120px;
+		display: inline-block;
+		margin: 5px;
+	}
+	div.readingBox:hover
+	{
+		background-color: #FFE0E0;
+	}
+	
+	div.readingTitle
+	{
+		font-family: Verdana;
+		font-size: 10pt;
+		height: 30px;
+		text-align: center;
+		padding-top: 0px;
+		margin-top: 0px;
+	}
+	div.readingValue
+	{
+		font-family: Arial;
+		font-size: 32pt;
+		text-align: center;
+		height: 70px;
+		width: 100%;
+		vertical-align: middle;
+		justify-content: center;
+		padding-top:20px;
+		overflow: hidden;
+	}
+	div.readingUnit
+	{
+		font-family: Arial;
+		font-size: 10px;
+		position: relative;
+		top: -10px;
+		text-align: right;
+		color: #A0A0A0;
+	}
+</style>
+	</head>
+	<body>
+	<div id="pageSensorContainer"></div>
+	<div id="chart_div"></div>
+	</body>
+</html>
