@@ -1,0 +1,192 @@
+<html>
+	<head>
+		<title></title>
+		<script src="https://code.jquery.com/jquery-3.1.1.min.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
+		<style>
+			div#panel_left
+			{
+				float:left;
+			}
+			div#panel_right
+			{
+				float:right;
+				height: 99%;
+				overflow: hidden;
+			}
+			div#container_led
+			{
+				width:500px;
+			}
+			div.preview_led
+			{
+				font-size: 6pt;
+				font-family: Courier New;
+				width: 20px;
+				height:10px;
+				border: 1px dotted #A0A0A0;
+				text-align: center;
+				float:left;
+			}
+			div.logEntry
+			{
+				border: 1px solid #A0A0A0;
+			}
+			div.logData
+			{
+				font-family: Courier New;
+				font-size: 9pt;
+			}
+			div.logTime
+			{
+				font-family: Courier New;
+				font-size: 8pt;
+				color: #A0A0A0;
+			}
+			div.logTopic
+			{
+				font-family: Courier New;
+				font-size: 6pt;
+				color: #E0E0E0;
+			}			
+		</style>
+		<script>
+		$(document).ready(function()
+		{
+			var aTopicList = [];
+			aTopicList[0]  = {'topic':'superstar/node/13696194/led/+/color'};
+			
+			var iMaxLedIndex = 0;
+			var setupLeds = function(inLedID)
+			{
+				if (inLedID > iMaxLedIndex)
+				{
+					for (var i=1; i <= inLedID; i++)
+					{
+						//Add If ObjectID does not exists
+						$('#container_led').append($('<div>').attr('id','preview_led_'+i).addClass('preview_led').html(i));
+					}
+					iMaxLedIndex = inLedID;
+				}
+			}
+			
+			var setStatus = function(inStatus, inColor)
+			{
+				$('#statusDescr').css('color', inColor).html(inStatus);
+			}
+			var setLedColor = function(inLedID, inColor)
+			{
+				$('#preview_led_' + inLedID).css('background-color', inColor);
+			}
+			var doLedShift = function()
+			{
+				var tColor;
+				for (var i=iMaxLedIndex; i > 1; i--)
+				{
+					tColor = $('#preview_led_' + (i-1)).css('background-color');
+					//console.log('Led_'+i+' color: '+tColor);
+					$('#preview_led_' + i).css('background-color', tColor);
+				}
+			}
+			
+			var doLogMessage = function(inTopic, inData)
+			{
+				var currentDate = new Date();
+				$('<div>')
+					.addClass('logEntry')
+					.append($('<div>').addClass('logData').html(inData))
+					.append($('<div>').addClass('logTime').html(currentDate))
+					.append($('<div>').addClass('logTopic').html(inTopic))
+					.prependTo($('#container_log'));
+			}
+			//-------------------------------------------------------------------
+			// Create a client instance: Broker, Port, Websocket Path, Client ID
+			client = new Paho.MQTT.Client("wss://iot.eclipse.org:443/ws", "1cd59b1e-a8be-464a-a9fe-3c901e8badf3");
+			
+			// set callback handlers
+			client.onConnectionLost = function (responseObject)
+			{
+				setStatus(responseObject.errorMessage,'#FF0000');
+				console.log("Connection Lost: " + responseObject.errorMessage);
+			}
+			
+			client.onMessageArrived = function (message)
+			{
+				//console.log("--------[ Message Arrived ");
+				//console.log("QoS:       " + message.qos);
+				//console.log("Retained:  " + message.retained);
+				//console.log("Duplicate: " + message.duplicate);
+				//console.log("Topic:     " + message.destinationName);
+				//console.log(message.payloadString);
+
+				doLogMessage(message.destinationName, message.payloadString);
+
+				tTopic = message.destinationName.match('superstar/node/13696194/led/([^/]+)/color');
+				if (tTopic.length == 2)
+				{
+					switch(tTopic[1])
+					{
+						case 'strip':
+							doLedShift();
+							setLedColor(1, message.payloadString);
+							break;
+						default:
+							if (!isNaN(tTopic[1]))
+							{
+								setLedColor(tTopic[1], message.payloadString);
+							} else console.log('Unknown: '+tTopic[1]);
+					}
+				}
+			}
+
+			// Called when the connection is made
+			function onConnect()
+			{
+				console.log("Connected!");
+				setStatus('Connected.','#00FF00');
+		
+				// Register to all queues we are interested in!
+				for ( iCounter = 0; iCounter < aTopicList.length; iCounter++)
+					client.subscribe(aTopicList[iCounter]['topic']);
+			}
+			function onFailure(inReason)
+			{
+				setStatus(inReason.errorMessage,'#FF0000');
+			}
+ 
+			// Connect the client, providing an onConnect callback
+			var rr = client.connect({
+				onSuccess: onConnect,
+				onFailure: onFailure,
+				timeout: 60,
+				userName : "Username",
+				password : "password"
+			});
+
+			setupLeds(144);
+			setStatus('Offline','#000000');
+			//$('.preview_led').click(function(e){doLedShift();});
+			//doLogMessage("superstar//topic","#ffffff");
+		});
+		</script>
+	</head>
+	<body>
+		<div>
+			<div>Status:</div>
+			<div id="statusDescr"></div>
+		</div>
+		<div>
+			<div>Status Color:</div>
+			<div></div>
+		</div>
+		<div id="panel_left">
+			Led Status:
+			<div id="container_led"></div>
+		</div>		
+
+		<div id="panel_right">
+			Led Log:
+			<div id="container_log"></div>
+		</div>
+	</body>
+</html>
