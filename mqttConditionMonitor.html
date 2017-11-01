@@ -1,0 +1,365 @@
+<html>
+	<head>
+		<title>Condition Monitor WebGUI</title>
+		<script src="https://code.jquery.com/jquery-3.1.1.min.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
+		<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+		<style>
+			body
+			{
+				background-color: #000000;
+				color: #A0A0A0;
+			}
+			div#mainGraph
+			{
+				position: absolute;
+				top: 50%;
+				left: 50%;
+				width: 610px;
+				height: 310px;
+				border: 1px solid #FF0000;
+				margin-left: -305px;
+				margin-top: -155px;
+				display:none;
+			}
+			div#pageContainer
+			{
+				position: absolute;
+				width: 610px;
+				height: 310px;
+				z-index: 15;
+				top: 50%;
+				left: 50%;
+				margin-left: -305px;
+				margin-top: -155px;
+
+			}
+			div#statusPanel
+			{
+				font-family: Verdana;
+				font-size: 8pt;
+				position: fixed;
+				bottom: 10px;
+			}
+			div#statusPanel > div
+			{
+				display: inline;
+			}
+			div#temperatureChart, div#humidityChart, div#pressureChart, div#altitudeChart,
+			div#temperatureValue, div#humidityValue, div#pressureValue, div#altitudeValue
+			{
+				position: absolute;
+				top: 50%;
+				left: 50%;
+				width: 300px;
+				height: 150px;
+				border: 1px solid #505050;
+			}
+			div#temperatureChart, div#temperatureValue
+			{
+				margin-left: -305px;
+				margin-top: -155px;
+			}
+			div#humidityChart, div#humidityValue
+			{
+				margin-top: -155px;
+				margin-left: 5px;
+			}
+		
+			div#pressureChart, div#pressureValue
+			{
+				margin-top: 5px;
+				margin-left: -305px;
+			}
+			
+			div#altitudeChart, div#altitudeValue
+			{
+				margin-top: 5px;
+				margin-left: 5px;
+			}
+
+			div.valueName
+			{
+				font-family: Verdana;
+				font-size: 8pt;
+				text-align: center;
+			}
+			div.valueStatus
+			{
+				font-family: verdana;
+				font-size: 6pt;
+				position: absolute;
+				bottom: 0px;
+			}
+			
+			div.currentValue
+			{
+				font-family: Arial;
+				font-size: 42pt;
+				text-align: center;
+			}
+
+			div.logEntry
+			{
+				border: 1px solid #A0A0A0;
+			}
+			div.logData
+			{
+				font-family: Courier New;
+				font-size: 9pt;
+			}
+			div.logTime
+			{
+				font-family: Courier New;
+				font-size: 8pt;
+				color: #A0A0A0;
+			}
+			div.logTopic
+			{
+				font-family: Courier New;
+				font-size: 6pt;
+				color: #E0E0E0;
+			}	
+		</style>
+		<script>
+		$(document).ready(function()
+		{
+			var chartData	= {};
+			var chartObject = {};
+
+
+			var aTopicList = [];
+			aTopicList[0]  = {'topic':'superstar/home/cESPOLedMqtt/77/temperature'};
+			aTopicList[1]  = {'topic':'superstar/home/cESPOLedMqtt/77/pressure'};
+			aTopicList[2]  = {'topic':'superstar/home/cESPOLedMqtt/77/altitude'};
+			aTopicList[3]  = {'topic':'superstar/home/cESPOLedMqtt/77/humidity'};
+			aTopicList[4]  = {'topic':'superstar/home/cESPOLedMqtt/temperature'};
+//			aTopicList[5]  = {'topic':'superstar/home/cESPOLedMqtt/vcc'};
+//			aTopicList[6]  = {'topic':'superstar/home/cESPOLedMqtt/heap'};
+
+			var valueLog = {};
+			var optionsGraphBig = {
+				curveType: 'function',
+				lineWidth: 2,
+				intervals: { 'style':'area' },
+				legend: 'none'
+			};
+			var options_lines = {
+				curveType: 'function',
+				lineWidth: 2,
+				intervals: { 'style':'area' },
+				legend: 'none',
+				backgroundColor: '#000000',
+				chartArea:{left:0,top:0,width:'100%',height:'100%'},
+				axisTitlesPosition: 'in',
+				vAxis: {
+					gridlines: {
+						color: 'none'
+					}
+				},
+				hAxis:
+				{
+					gridlines:
+					{
+						color:'none'
+					}
+				}
+       			 };
+ 
+			var getDataContainer = function()
+			{
+				var data = new google.visualization.DataTable();
+				data.addColumn('date', 'x');
+				data.addColumn('number', 'values');
+				data.addColumn({id:'i0', type:'number', role:'interval'});
+				data.addColumn({id:'i0', type:'number', role:'interval'});
+
+				return data;
+			}
+
+			/* Initiate DB */	
+			var getDateKey = function()
+			{
+				var d = new Date();
+				var strKeyDate =
+					d.getUTCFullYear() * 100000000 + 
+					d.getUTCMonth()    * 1000000   +
+					d.getUTCDay()      * 10000+
+					d.getUTCHours()    * 100+ 
+					d.getUTCMinutes(); 
+
+				return strKeyDate;
+			}
+			var getCurrentTime = function()
+			{
+				var currentdate = new Date(); 
+				var datetime = currentdate.getFullYear()    + "-" +
+						(currentdate.getMonth()+1)  + "-" +
+						currentdate.getDate()       + " " +
+						currentdate.getHours()      + ":" +
+						currentdate.getMinutes()    + "." +
+						currentdate.getSeconds();
+
+				return datetime;
+			}
+
+			
+			var mainGraph = "";
+			var plotBigGraph = function(inGraphType)
+			{
+
+				if (mainGraph == "")
+					mainGraph = new google.visualization.LineChart(document.getElementById('mainGraph'));
+				mainGraph.draw(chartData[inGraphType], optionsGraphBig);
+			}
+			var plotData = function(inGraphType)
+			{
+				if (!(inGraphType in chartObject))
+				{
+					chartObject[inGraphType] = new google.visualization.LineChart(document.getElementById(inGraphType + 'Chart'));
+				}
+			        chartObject[inGraphType].draw(chartData[inGraphType], options_lines);
+				console.log(chartData[inGraphType]);
+			}
+
+			var setStatus = function(inStatus, inColor)
+			{
+				$('#statusDescr').css('color', inColor).html(inStatus);
+			}
+			
+			var doLogMessage = function(inMessage)
+			{
+				console.log("[MQTT]:" + inMessage.destinationName+ "("+inMessage.qos+"/"+inMessage.retained+"/"+inMessage.duplicate+") -> "+inMessage.payloadString);
+			}
+			// ------------------------------------------------------------------
+
+			//-------------------------------------------------------------------
+			// Create a client instance: Broker, Port, Websocket Path, Client ID
+			client = new Paho.MQTT.Client("wss://iot.eclipse.org:443/ws", "1cd59b1e-a8be-464a-a9fe-3c901e8badf3");
+			
+			// set callback handlers
+			client.onConnectionLost = function (responseObject)
+			{
+				setStatus(responseObject.errorMessage,'#FF0000');
+				console.log("Connection Lost: " + responseObject.errorMessage);
+			}
+			
+			client.onMessageArrived = function (message)
+			{
+				doLogMessage(message);
+
+				var recordKey = getDateKey();
+				var messageValue = parseFloat(message.payloadString);
+				var readingType = message.destinationName.split(/[/]+/).pop();
+
+				// If we have chart then 'pop' real-time value
+				if(!(readingType in chartData))
+					chartData[readingType] = getDataContainer();
+				//	else chartData[readingType]['area'].pop();
+
+				// If we buffered eough data. Push static reading to graph
+				if ((readingType in valueLog) && recordKey != valueLog[readingType]['key'])
+				{
+					chartData[readingType].addRows
+					([[
+						new Date(),
+						valueLog[readingType]['valueSum']/valueLog[readingType]['valueCount'],
+						valueLog[readingType]['min'],
+						valueLog[readingType]['max']
+						
+					]]);
+					delete valueLog[readingType];
+					plotData(readingType);
+				}
+
+				if (!(readingType in valueLog))
+					valueLog[readingType] = {'key': recordKey, 'min':99999999, 'max':-99999999, 'valueSum':0, 'valueCount':0};
+				
+				if (messageValue > valueLog[readingType]['max'])
+					valueLog[readingType]['max'] = messageValue;
+
+				if (messageValue < valueLog[readingType]['min'])
+					valueLog[readingType]['min'] = messageValue;
+				
+				valueLog[readingType]['valueSum'] += messageValue;
+				valueLog[readingType]['valueCount']++;
+
+				$("#"+readingType+"ValueText").html(messageValue);
+				$("#"+readingType+"Status").html('Last Updated: ' + getCurrentTime());
+			}
+
+			// Called when the connection is made
+			function onConnect()
+			{
+				console.log("Connected!");
+				setStatus('Connected.','#00FF00');
+		
+				// Register to all queues we are interested in!
+				for ( iCounter = 0; iCounter < aTopicList.length; iCounter++)
+					client.subscribe(aTopicList[iCounter]['topic']);
+			}
+			function onFailure(inReason)
+			{
+				setStatus(inReason.errorMessage,'#FF0000');
+			}
+ 
+			// Connect the client, providing an onConnect callback
+			var rr = client.connect({
+				onSuccess: onConnect,
+				onFailure: onFailure,
+				timeout: 60,
+				userName : "Username",
+				password : "password"
+			});
+
+			$('.currentValue').click(function(e)
+			{
+				$('#pageContainer').fadeOut();
+				$('#mainGraph').fadeIn();
+				plotBigGraph('temperature');
+			});
+			$('#mainGraph').click(function(e)
+			{
+				$('#mainGraph').fadeOut();
+				$('#pageContainer').fadeIn();
+			});
+			setStatus('Offline','#000000');
+			google.charts.load('current', {'packages':['corechart']});
+
+		});
+		</script>
+	</head>
+	<body>
+		<div id="pageContainer">
+		<div id="temperatureChart"></div>
+		<div id="temperatureValue" class="currentValue">
+			<div class="valueName">Temperature [C]</div>
+			<div id="temperatureValueText"></div>
+			<div id="temperatureStatus"class="valueStatus"></div>
+		</div>
+		<div id="humidityChart"></div>
+		<div id="humidityValue" class="currentValue">
+			<div class="valueName">Humidity [%]</div>
+			<div id="humidityValueText"></div>
+			<div id="humidityStatus" class="valueStatus"></div>
+		</div>
+		<div id="pressureChart"></div>
+		<div id="pressureValue" class="currentValue">
+			<div class="valueName">Pressure [hPa]</div>
+			<div id="pressureValueText"></div>
+			<div id="pressureStatus" class="valueStatus"></div>
+		</div>
+		<div id="altitudeChart"></div>
+		<div id="altitudeValue" class="currentValue">
+			<div class="valueName">Altitude [m]</div>
+			<div id="altitudeValueText"></div>
+			<div id="altitudeStatus"class="valueStatus"></div>
+		</div>
+		</div>
+		<div id="mainGraph"></div>
+		<div id="statusPanel">
+			<div>Status:</div>
+			<div id="statusDescr"></div>
+		</div>
+	</body>
+</html>
