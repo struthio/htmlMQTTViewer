@@ -8,6 +8,7 @@
 			body
 			{
 				background-color: #000000;
+				background-image: url(bground.svg);
 				color: #A0A0A0;
 			}
 			div#mainGraph
@@ -45,8 +46,8 @@
 			{
 				display: inline;
 			}
-			div#temperatureChart, div#humidityChart, div#pressureChart, div#altitudeChart,
-			div#temperatureValue, div#humidityValue, div#pressureValue, div#altitudeValue
+			div#temperatureChart, div#humidityChart, div#pressureChart, div#heapChart,
+			div#temperatureValue, div#humidityValue, div#pressureValue, div#heapValue
 			{
 				position: absolute;
 				top: 50%;
@@ -72,10 +73,14 @@
 				margin-left: -305px;
 			}
 			
-			div#altitudeChart, div#altitudeValue
+			div#heapChart, div#heapValue
 			{
 				margin-top: 5px;
 				margin-left: 5px;
+			}
+			div.valueChart
+			{
+			/*	background-color: #000000;*/
 			}
 
 			div.valueName
@@ -97,6 +102,7 @@
 				font-family: Arial;
 				font-size: 42pt;
 				text-align: center;
+				overflow: hidden;
 			}
 
 			div.logEntry
@@ -131,25 +137,34 @@
 			var aTopicList = [];
 			aTopicList[0]  = {'topic':'superstar/home/cESPOLedMqtt/77/temperature'};
 			aTopicList[1]  = {'topic':'superstar/home/cESPOLedMqtt/77/pressure'};
-			aTopicList[2]  = {'topic':'superstar/home/cESPOLedMqtt/77/altitude'};
-			aTopicList[3]  = {'topic':'superstar/home/cESPOLedMqtt/77/humidity'};
-			aTopicList[4]  = {'topic':'superstar/home/cESPOLedMqtt/temperature'};
+//			aTopicList[2]  = {'topic':'superstar/home/cESPOLedMqtt/77/altitude'};
+			aTopicList[2]  = {'topic':'superstar/home/cESPOLedMqtt/77/humidity'};
+			aTopicList[3]  = {'topic':'superstar/home/cESPOLedMqtt/temperature'};
 //			aTopicList[5]  = {'topic':'superstar/home/cESPOLedMqtt/vcc'};
-//			aTopicList[6]  = {'topic':'superstar/home/cESPOLedMqtt/heap'};
+			aTopicList[4]  = {'topic':'superstar/home/cESPOLedMqtt/heap'};
 
 			var valueLog = {};
 			var optionsGraphBig = {
 				curveType: 'function',
 				lineWidth: 2,
 				intervals: { 'style':'area' },
-				legend: 'none'
+				legend: 'none',
+				chartArea:{left:50,top:10,width:'95%',height:'80%'},
+				hAxis:
+				{
+					gridlines:
+					{
+						minutes: {format: 'HH:mm'}
+					},
+					format: 'HH:mm'
+				}
 			};
 			var options_lines = {
 				curveType: 'function',
 				lineWidth: 2,
 				intervals: { 'style':'area' },
 				legend: 'none',
-				backgroundColor: '#000000',
+				backgroundColor: {fill: 'transparent'},
 				chartArea:{left:0,top:0,width:'100%',height:'100%'},
 				axisTitlesPosition: 'in',
 				vAxis: {
@@ -169,7 +184,7 @@
 			var getDataContainer = function()
 			{
 				var data = new google.visualization.DataTable();
-				data.addColumn('date', 'x');
+				data.addColumn('datetime', 'x');
 				data.addColumn('number', 'values');
 				data.addColumn({id:'i0', type:'number', role:'interval'});
 				data.addColumn({id:'i0', type:'number', role:'interval'});
@@ -219,7 +234,6 @@
 					chartObject[inGraphType] = new google.visualization.LineChart(document.getElementById(inGraphType + 'Chart'));
 				}
 			        chartObject[inGraphType].draw(chartData[inGraphType], options_lines);
-				console.log(chartData[inGraphType]);
 			}
 
 			var setStatus = function(inStatus, inColor)
@@ -229,7 +243,8 @@
 			
 			var doLogMessage = function(inMessage)
 			{
-				console.log("[MQTT]:" + inMessage.destinationName+ "("+inMessage.qos+"/"+inMessage.retained+"/"+inMessage.duplicate+") -> "+inMessage.payloadString);
+				if (false)
+					console.log("[MQTT]:" + inMessage.destinationName+ "("+inMessage.qos+"/"+inMessage.retained+"/"+inMessage.duplicate+") -> "+inMessage.payloadString);
 			}
 			// ------------------------------------------------------------------
 
@@ -251,6 +266,11 @@
 				var recordKey = getDateKey();
 				var messageValue = parseFloat(message.payloadString);
 				var readingType = message.destinationName.split(/[/]+/).pop();
+
+				if (readingType == 'pressure')
+				{
+					messageValue = Math.round(messageValue)/100;
+				}
 
 				// If we have chart then 'pop' real-time value
 				if(!(readingType in chartData))
@@ -316,12 +336,20 @@
 			{
 				$('#pageContainer').fadeOut();
 				$('#mainGraph').fadeIn();
-				plotBigGraph('temperature');
+
+				var patt = /[a-z]+/;
+				var targetId = patt.exec(e.target.id);
+
+				plotBigGraph(targetId);
 			});
 			$('#mainGraph').click(function(e)
 			{
 				$('#mainGraph').fadeOut();
 				$('#pageContainer').fadeIn();
+				$.each( chartObject, function( key, value )
+				{
+					value.draw(chartData[key], options_lines);
+				});
 			});
 			setStatus('Offline','#000000');
 			google.charts.load('current', {'packages':['corechart']});
@@ -331,30 +359,30 @@
 	</head>
 	<body>
 		<div id="pageContainer">
-		<div id="temperatureChart"></div>
-		<div id="temperatureValue" class="currentValue">
-			<div class="valueName">Temperature [C]</div>
-			<div id="temperatureValueText"></div>
-			<div id="temperatureStatus"class="valueStatus"></div>
-		</div>
-		<div id="humidityChart"></div>
-		<div id="humidityValue" class="currentValue">
-			<div class="valueName">Humidity [%]</div>
-			<div id="humidityValueText"></div>
-			<div id="humidityStatus" class="valueStatus"></div>
-		</div>
-		<div id="pressureChart"></div>
-		<div id="pressureValue" class="currentValue">
-			<div class="valueName">Pressure [hPa]</div>
-			<div id="pressureValueText"></div>
-			<div id="pressureStatus" class="valueStatus"></div>
-		</div>
-		<div id="altitudeChart"></div>
-		<div id="altitudeValue" class="currentValue">
-			<div class="valueName">Altitude [m]</div>
-			<div id="altitudeValueText"></div>
-			<div id="altitudeStatus"class="valueStatus"></div>
-		</div>
+			<div id="temperatureChart" class="valueChart"></div>
+			<div id="temperatureValue" class="currentValue">
+				<div class="valueName">Temperature [&deg;C]</div>
+				<div id="temperatureValueText"></div>
+				<div id="temperatureStatus"class="valueStatus"></div>
+			</div>
+			<div id="humidityChart" class="valueChart"></div>
+			<div id="humidityValue" class="currentValue">
+				<div class="valueName">Humidity [%]</div>
+				<div id="humidityValueText"></div>
+				<div id="humidityStatus" class="valueStatus"></div>
+			</div>
+			<div id="pressureChart" class="valueChart"></div>
+			<div id="pressureValue" class="currentValue">
+				<div class="valueName">Pressure [hPa]</div>
+				<div id="pressureValueText"></div>
+				<div id="pressureStatus" class="valueStatus"></div>
+			</div>
+			<div id="heapChart" class="valueChart"></div>
+			<div id="heapValue" class="currentValue">
+				<div class="valueName">Heap [b]</div>
+				<div id="heapValueText"></div>
+				<div id="heapStatus"class="valueStatus"></div>
+			</div>
 		</div>
 		<div id="mainGraph"></div>
 		<div id="statusPanel">
