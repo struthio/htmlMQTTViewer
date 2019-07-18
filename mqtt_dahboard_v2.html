@@ -1,0 +1,391 @@
+<html>
+	<head>
+		<script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
+		<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js" type="text/javascript"></script>
+		<script>
+			$(document).ready(function()
+			{
+				// GLOBAL VARIABLES
+				var dashboardConfig = [
+					{"topic": "/superstar/home/eden/temp/cpu","name":"CPU Temp","group":"eden","type":"none"},
+					{"topic": "/superstar/home/eden/freq/cpu","name":"CPU Freq","group":"eden","type":"none"},
+					{"topic": "/superstar/home/eden/tx_bytes/eth0","name":"ETH TX","group":"eden","type":"none"},
+					{"topic": "/superstar/home/eden/rx_bytes/eth0","name":"ETH RX","group":"eden","type":"none"},
+					{"topic": "/superstar/home/eden/loadavg/1m","name":"LOAD 1m","group":"eden","type":"none"},
+					{"topic": "/superstar/home/eden/loadavg/5m","name":"LOAD 5m","group":"eden","type":"none"},
+					{"topic": "/superstar/home/eden/loadavg/15m","name":"LOAD 15m","group":"eden","type":"none"},
+					{"topic": "/superstar/home/eden/fsroot/free","name":"Free Root FS","group":"eden","type":"none"},
+					{"topic": "/superstar/home/eden/tx_speed/eth0","name":"SPEED TX","group":"eden","type":"none"},
+					{"topic": "/superstar/home/eden/rx_speed/eth0","name":"SPEED RX","group":"eden","type":"none"},
+					{"topic": "superstar/device/899160/software/name","name":"Soft Name","group":"omonitor","type":"none"},
+					{"topic": "superstar/device/899160/software/version","name":"Soft Version","group":"omonitor","type":"none"},
+					{"topic": "superstar/device/899160/77/temperature","name":"Temperature","group":"omonitor","type":"none"},
+					{"topic": "superstar/device/899160/77/pressure","name":"Pressure","group":"omonitor","type":"none"},
+					{"topic": "superstar/device/899160/77/humidity","name":"Humidity","group":"omonitor","type":"none"},
+					{"topic": "superstar/device/899160/temperature","name":"Avg.Temp","group":"omonitor","type":"none"},
+					{"topic": "superstar/device/899160/vcc","name":"Vcc","group":"omonitor","type":"none"},
+					{"topic": "superstar/device/899160/heap","name":"Heap","group":"omonitor","type":"none"},
+				];
+
+				var chartDataStore = {};
+				var chartDetails = {};
+				var optionsChartSmall = {
+					axisTitlesPosition: "none",
+					enableInteractivity: "false",
+					legend: {position: "none"},
+					titlePosition: "none",
+					chartArea:{left:0,top:0,width:'100%',height:'100%'},
+					lineWidth: 1,
+					hAxis: {textPosition: "none", gridlines: "none"},
+					vAxis: {textPosition: "none"},
+				};
+				var optionsChartBig = 
+				{
+					vAxis: {format: "short"}
+				};
+				var getCurrentTime = function()
+				{
+					var currentdate = new Date(); 
+					var datetime = currentdate.getFullYear()    + "-" +
+							(currentdate.getMonth()+1)  + "-" +
+							currentdate.getDate()       + " " +
+							currentdate.getHours()      + ":" +
+							currentdate.getMinutes()    + "." +
+							currentdate.getSeconds();
+
+					return datetime;
+				}
+
+				var chartCreateDataStore = function()
+				{
+					var data = new google.visualization.DataTable();
+					data.addColumn('datetime', 'x');
+					data.addColumn('number', 'values');
+					
+					var createTime = new Date();
+					var currentMillis = createTime.valueOf();
+					//console.log(currentMillis);
+					for (var i = 0; i < 60; i++)
+						data.addRows([[new Date(currentMillis - ((60-i)*1000)), 0]]);
+
+					return data;
+				}				
+				var chartPrepareDataContainer = function(inTopicName)
+				{
+					var entryId = entryGetIdByTopic(inTopicName);
+					chartDataStore[entryId] =
+					{
+						updated: true,
+						data: chartCreateDataStore(),
+						chart: new google.visualization.AreaChart(document.getElementById("chart-"+entryId)),
+					}
+
+					//chartDataStore[inTopicName]["chart"].draw(chartDataStore[inTopicName]["data"], optionsChartSmall);
+				}
+				var chartAddReadings = function(inTopicName, inValue)
+				{
+					var entryId = entryGetIdByTopic(inTopicName);
+					//console.log("Adding data entry");
+					if (entryId in chartDataStore)
+					{
+						chartDataStore[entryId]["updated"] = true;
+						chartDataStore[entryId]["data"].removeRow(0);
+						chartDataStore[entryId]["data"].addRows([[new Date(),inValue]]);
+					}
+				}
+				var chartRefresh = function()
+				{
+					for (var chartKey in chartDataStore)
+					{
+						if (chartDataStore[chartKey]["updated"])
+						{
+							chartDataStore[chartKey]["chart"].draw(chartDataStore[chartKey]["data"], optionsChartSmall);
+							chartDataStore[chartKey]["updated"] = false;
+						}
+					}
+				}
+				// ---------------------------------------
+				//
+				// ---------------------------------------
+				var statusConnected = function(inCurrentStatus)
+				{
+					if (inCurrentStatus)
+						$('#statusConnection').html("ONLINE");
+					else
+						$('#statusConnection').html("OFFLINE");
+							
+				}
+				
+				// ---------------------------------------
+				// Section Functions
+				// ---------------------------------------
+				var sectionAddById = function(inSectionId)
+				{
+					console.log("Adding Section: " + inSectionId);
+					var sectionName = inSectionId;
+					var positionSection;
+					var foundSection = false;
+					$.each( $('div.measurement-container > div.measurement-section'), function(i, left)
+					{
+						positionSection = $(this);
+						console.log("Checking: "+$(this).attr('data-name'));
+						if ($(this).attr('data-name') > sectionName)
+						{
+							foundSection = true;
+							return false;
+						}
+					});
+
+					var newSectionBody = $("<div>")
+						.attr({"id":inSectionId,"data-name":sectionName})
+						.addClass("measurement-section");
+
+					if (foundSection)
+						newSectionBody.insertBefore(positionSection);
+					else
+						newSectionBody.appendTo('div.measurement-container');
+
+				}
+				var sectionGetIdByTopic = function(inTopicName)
+				{
+                                        var returnValue = "default";
+                                        $.each(dashboardConfig, function (i, value)
+                                        {
+                                                if (value["topic"] == inTopicName)
+                                                {
+							returnValue = value["group"];
+							return false;
+                                                }
+                                        });
+                                        return "section-"+returnValue;
+				}
+				var sectionGetByTopic = function(inTopicName)
+				{
+					var sectionObject;
+					var sectionId = sectionGetIdByTopic(inTopicName);
+					if ($("#" + sectionId).length == 0)
+						sectionAddById(sectionId);
+
+					sectionObject = $("#" + sectionId);
+
+					return sectionObject;
+				}
+				// ---------------------------------------
+				// Entry Functions
+				// ---------------------------------------
+				var entryOnClick = function(inEvent)
+				{
+					console.log(inEvent);
+					var eventObject = $(inEvent.currentTarget);
+					if (!eventObject.hasClass("measurement-entry-selected"))
+					{
+						$("div.measurement-entry").removeClass("measurement-entry-selected");
+						eventObject.addClass("measurement-entry-selected");
+						$("div.measurement-container").addClass("measurement-container-selected");
+						
+						$("#measurement-details")
+							.fadeIn(500);
+
+						chartDetails.draw(chartDataStore[eventObject[0].id]["data"], optionsChartBig);
+						//$( "div.measurement-container" ).animate({
+						//	opacity: 1,
+						//	width: 270
+						//}, 1000, function() {
+						//	// Animation complete.
+						//});
+
+					} else
+					{
+						eventObject.removeClass("measurement-entry-selected");
+						//$("div.measurement-container").removeClass("measurement-container-selected", 1000);
+						$("#measurement-details").fadeOut(500, function()
+						{
+							$("div.measurement-container").removeClass("measurement-container-selected");
+						});
+						//$( "div.measurement-container" ).animate({
+						//	opacity: 1,
+						//	width: ''
+						//}, 1000, function() {
+						//	// Animation complete.
+						//});
+					}
+				}
+
+				var entryGetNameByTopic = function(inTopicName)
+				{	
+					var returnValue = inTopicName;
+					$.each(dashboardConfig, function (i, value)
+					{
+						//console.log(value["topic"]+" == "+inTopicName);
+						if (value["topic"] == inTopicName)
+						{
+							returnValue = value["name"];
+							return false;
+						}
+					});
+					return returnValue;
+				}
+				var entryAddByTopic = function(inTopicName)
+				{
+					var entryId = entryGetIdByTopic(inTopicName);
+					var sectionObject = sectionGetByTopic(inTopicName);
+					// How to get Section Here
+					var foundSection = false;
+					var entryName = entryGetNameByTopic(inTopicName);
+					var entryPosition;
+					$.each( $('div.measurement-entry', sectionObject), function(i, left)
+					{
+						entryPosition = $(this);
+						console.log("Checking Entry: "+$(this).attr('data-name'));
+						if ($(this).attr('data-name') > entryName)
+						{
+							foundSection = true;
+							return false;
+						}
+					});
+					var newEntryBody = $("<div>").attr({"id": entryId, "data-name": entryName}).addClass("measurement-entry").click(entryOnClick);
+
+					$("<div>").attr({"id":"chart-"+entryId}).addClass("entry-chart").html("Loading...").appendTo(newEntryBody);
+					$("<div>").addClass("entry-title").html(entryGetNameByTopic(inTopicName)).appendTo(newEntryBody);
+					$("<div>").addClass("entry-value").html("--VALUE--").appendTo(newEntryBody);
+					$("<div>").addClass("entry-status").html("--UPDATED--").appendTo(newEntryBody);
+
+					if (foundSection && entryPosition) newEntryBody.insertBefore(entryPosition);
+						else newEntryBody.appendTo(sectionObject);
+	
+					chartPrepareDataContainer(inTopicName);
+				}
+				var entryGetIdByTopic = function(inTopicName)
+				{
+					return "entry-" + inTopicName.replace(/\//g,"");
+				}
+				var entryGetByTopic = function(inTopicName)
+				{
+					var entryId = entryGetIdByTopic(inTopicName);
+					if ($("#" + entryId).length == 0)
+						entryAddByTopic(inTopicName);
+
+					return $("#" + entryId);
+				}
+				var entryUpdateByTopic = function(inTopicName, inValue)
+				{
+					//console.log("Updating: " + inTopicName + " -> " + inValue);
+					var entryObject = entryGetByTopic(inTopicName);
+					$("div.entry-value", entryObject).html(inValue);
+					$("div.entry-status", entryObject).html(getCurrentTime());
+
+					chartAddReadings(inTopicName, parseFloat(inValue));
+				}
+				// MQTT Client
+				// Create a client instance: Broker, Port, Websocket Path, Client ID
+				client = new Paho.Client("wss://iot.eclipse.org:443/ws", "1cd59b1e-a8be-464a-aafe");
+
+				// set callback handlers
+				client.onConnectionLost = function (responseObject)
+				{
+					console.log("Connection Lost: " + responseObject.errorMessage);
+					statusConnected(false);
+				}
+				client.onMessageArrived = function (message)
+				{
+				//	console.log(message);
+					entryUpdateByTopic(message.destinationName, message.payloadString);
+				//	var recordKey = getDateKey();
+				//	var messageValue = parseFloat(message.payloadString);
+				//	var readingType = message.destinationName.split(/[/]+/).pop();
+					
+				}
+
+				// Called when the connection is made
+				client.onConnected = function(inReconnect, inUri)
+				{
+					console.log("Connected!");
+		
+					// Register to all queues we are interested in!
+					//for ( iCounter = 0; iCounter < aTopicList.length; iCounter++)
+					//	client.subscribe(aTopicList[iCounter]['topic']);
+					client.subscribe("/superstar/#");
+					client.subscribe("superstar/#");
+					//client.subscribe("/superstar/home/eden/temp/cpu");
+					//client.subscribe("/superstar/home/eden/loadavg/1m");
+					statusConnected(true);
+				}
+				function onFailure(inReason)
+				{
+					console.log(inReason);
+				//	setStatus(inReason.errorMessage,'#FF0000');
+				}
+				// ---------------------------------------
+				//
+				// ---------------------------------------
+				var chartLoadedLibrary = function()
+				{
+					console.log("Google Chart Library Loaded");
+					//console.log(entryGetByTopic("superstar/device/899160/temperature"));
+					chartDetails = new google.visualization.AreaChart(document.getElementById("measurement-details"));
+					setInterval(chartRefresh, 1000);
+					// Connect the client, providing an onConnect callback
+					var rr = client.connect({
+						onFailure: onFailure,
+						timeout: 60,
+						reconnect: false,
+						userName : "Username",
+						password : "password"
+					});
+				}
+				// ---------------------------------------
+				// COMMON CODE
+				// ---------------------------------------
+				google.charts.load('current', {'packages':['corechart']});
+				google.charts.setOnLoadCallback(chartLoadedLibrary);
+
+				console.log("Ready.");
+				$(window).resize(function()
+				{
+					var windowWidth = $(window).width();
+					if (windowWidth > 300)
+						$("#measurement-details").width(windowWidth-350);
+					console.log("Resize: " + windowWidth);
+				});
+//				$(window).scroll(function() {  $('#measurement-details').animate({top:$(this).scrollTop()}, 1000); });
+			});
+		</script>
+		<style>	
+			body { background-color: #F0F0F0; }
+/*			div { border: 1px solid #ff0000; }*/
+			div.measurement-container { border: 1px dotted #00FF00; padding: 3px; margin: 3px; } 
+			div.measurement-container-selected { width: 270; }
+			div.measurement-section   { border: 1px dashed #E0E0E0; padding: 3px; margin-bottom: 10px; background-color: #FFFFFF; }
+			div.measurement-entry     { border: 1px dotted #E0E0E0; margin: 3px; width: 254px; height: 75px; overflow: hidden;  display: inline-block; cursor:pointer;}
+			div.measurement-entry:hover { background-color: #F0F1FF; }
+			div.measurement-entry-selected 	{ background-color: #FF00FF; }
+			div.measurement-details		{ border: 1px solid #ff0000; display:none; width: 1000px; height: 500px; position:fixed; top: 10px; left: 300px; }
+			div.entry-chart			{ border: 1px solid #117DBB; width: 75px; height: 50px; margin: 12px; float: left; }
+			div.entry-title			{ margin-top: 15px; font-family: Segoe UI; font-size: 12px; width: 150px; height: 15px; overflow: hidden; }
+			div.entry-value			{ margin-top: 6px; font-family: Segoe UI; font-size: 9px; }
+			div.entry-status		{ margin-top: 20px; font-size: 5px; text-align: right; }
+			div.page-footer > div { display: inline-block; }
+		</style>
+	</head>
+	<body>
+		<div class="page-header"></div>
+		<div class="measurement-container">
+			<!--<div class="measurement-section" data-name="Section1">
+				<div class="measurement-entry">
+					<div class="entry-chart" id="chartdemo"></div>
+					<div style="float:right;">
+					<div class="entry-title">CPU</div>
+					<div class="entry-value">50 %</div>
+					<div class="entry-status">2019-12-12 19:21:12.11</div>
+					</div>
+				</div>
+			</div>-->
+		</div>
+		<div id="measurement-details" class="measurement-details">--DETAIL--</div>
+		<div class="page-footer">
+			<div class="" id="statusConnection">Offline</div>
+			<div class="" >(c) 2019</div>
+		</div>
+	</body>
+</html>
