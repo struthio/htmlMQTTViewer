@@ -279,7 +279,7 @@
 				}
 				// MQTT Client
 				// Create a client instance: Broker, Port, Websocket Path, Client ID
-				client = new Paho.Client("ws://mqtt.eclipse.org:1883", "1cd59b1e-a8be-464a-aafe");
+				client = new Paho.MQTT.Client("mqtt.eclipse.org", 1883, "1cd59b1e-a8be-464a-aafe");
 
 				// set callback handlers
 				client.onConnectionLost = function (responseObject)
