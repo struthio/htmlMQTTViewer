@@ -45,7 +45,7 @@ $(document).ready(function()
 	// --------------------------------------------------------------------------------------
 	// --------------------------------------------------------------------------------------
 	// Create a client instance: Broker, Port, Websocket Path, Client ID
-	client = new Paho.MQTT.Client("wss://iot.eclipse.org:443/ws", "cc94c3fc-92c1-4ea7-813d-f4182009f03c");
+	client = new Paho.MQTT.Client("wss://mqtt.eclipse.org:443/mqtt", "cc94c3fc-92c1-4ea7-813d-f4182009f03c");
  
 	// set callback handlers
 	client.onConnectionLost = function (responseObject)
