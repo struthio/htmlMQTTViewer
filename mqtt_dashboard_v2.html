@@ -2,7 +2,7 @@
 	<head>
 		<script src="https://code.jquery.com/jquery-3.4.1.min.js"></script>
 		<script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
-		<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.js" type="text/javascript"></script>
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js" type="text/javascript"></script>
 		<script>
 			$(document).ready(function()
 			{
@@ -26,6 +26,7 @@
 					{"topic": "superstar/device/899160/temperature","name":"Avg.Temp","group":"omonitor","type":"none"},
 					{"topic": "superstar/device/899160/vcc","name":"Vcc","group":"omonitor","type":"none"},
 					{"topic": "superstar/device/899160/heap","name":"Heap","group":"omonitor","type":"none"},
+					{"topic": "superstar/device/3497238376321240/rpm","name":"RPM","group":"odroid","type":"none"},
 				];
 
 				var chartDataStore = {};
@@ -279,7 +280,7 @@
 				}
 				// MQTT Client
 				// Create a client instance: Broker, Port, Websocket Path, Client ID
-				client = new Paho.Client("mqtt.eclipse.org", 443, "/mqtt", "1cd59b1e-a8be-464a-aafe");
+				client = new Paho.Client("wss://iot.eclipse.org:443/ws", "1cd59b1e-a8be-464a-aafe");
 
 				// set callback handlers
 				client.onConnectionLost = function (responseObject)
