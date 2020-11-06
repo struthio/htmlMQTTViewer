@@ -27,7 +27,7 @@
     <title>LED Matrix Controller</title>
     <script>
       $(document).ready(function () {
-        let configDialog, configForm;
+        let configDialog, configForm, connectionLostDialog;
         let matrixWidth = 20,
           matrixHeight = 21;
 
@@ -72,6 +72,7 @@
 
           onConnectionLost = function (responseObject) {
             console.log("Connection Lost: " + responseObject.errorMessage);
+            connectionLostDialog.dialog('open');
           };
 
           onMessageArrived = function (message) {
@@ -83,10 +84,16 @@
             console.log("Duplicate: " + message.duplicate);
             console.log("Topic:     " + message.destinationName);
             */
-            let ledId = message.destinationName.match(
+            const ledId = message.destinationName.match(
               /^other\/ledmatrix\/led\/([0-9]{1,3})$/
             );
             if (ledId !== undefined && ledId != null) {
+              console.log(
+                "Server changing box ",
+                ledId[1],
+                " to ",
+                message.payloadString
+              );
               boxList.setColorByBoxId(ledId[1], message.payloadString, true);
             }
           };
@@ -94,7 +101,7 @@
           // Called when the connection is made
           onConnect = () => {
             console.log("Connected!");
-            let pkg = this.client.subscribe(this.topicPrefix + "led/+");
+            const pkg = this.client.subscribe(this.topicPrefix + "led/+");
             this.callbackSuccess();
           };
 
@@ -182,8 +189,8 @@
           constructor(inCanvas) {
             this.canvas = inCanvas;
 
-            let canvasWidth = this.canvas.canvas.clientWidth;
-            let canvasHeight = this.canvas.canvas.clientHeight;
+            const canvasWidth = this.canvas.canvas.clientWidth;
+            const canvasHeight = this.canvas.canvas.clientHeight;
             this.boxSizeW = Math.floor(canvasWidth / matrixWidth);
             this.boxSizeH = Math.floor(canvasHeight / matrixHeight);
           }
@@ -254,20 +261,23 @@
             this.canvas = document
               .getElementsByTagName("canvas")[0]
               .getContext("2d");
+            this.clickHeldDown = false;
           }
 
           setActiveColor = (color) => {
             this.activeColor = color.toHexString();
           };
 
-          onMouseMove = function (e) {
+          onMouseMove = (e) => {
             const relativeX = e.pageX - e.currentTarget.offsetLeft; //offsetX
             const relativeY = e.pageY - e.currentTarget.offsetTop; //offsetY
 
-            let tmpBoxPosition = boxList.getBoxByPositionXY(
+            const tmpBoxPosition = boxList.getBoxByPositionXY(
               relativeX,
               relativeY
             );
+
+            if (this.clickHeldDown) tmpBoxPosition.setColor(this.activeColor);
             boxList.setActive(tmpBoxPosition, this.canvas);
           };
 
@@ -275,13 +285,19 @@
             const relativeX = e.pageX - e.currentTarget.offsetLeft;
             const relativeY = e.pageY - e.currentTarget.offsetTop;
 
-            let tmpBoxPosition = boxList.getBoxByPositionXY(
+            const tmpBoxPosition = boxList.getBoxByPositionXY(
               relativeX,
               relativeY
             );
 
             tmpBoxPosition.setColor(this.activeColor);
             tmpBoxPosition.draw(this.canvas);
+
+            this.clickHeldDown = true;
+          };
+
+          onMouseUp = (e) => {
+            this.clickHeldDown = false;
           };
 
           onWindowResize = (e) => {
@@ -318,7 +334,7 @@
         /* ---------------------------------------- *
          * Initialize board                         *
          * ---------------------------------------- */
-        let boardInitialize = function () {
+        const boardInitialize = function () {
           boxCanvas = new CanvasPainter();
           boxCanvas.sizeCanvasToDocument(matrixWidth, matrixHeight);
 
@@ -328,6 +344,7 @@
 
           $("#canvas").mousemove(boxCanvas.onMouseMove);
           $("#canvas").mousedown(boxCanvas.onMouseDown);
+          $("#canvas").mouseup(boxCanvas.onMouseUp);
           $(window).resize(boxCanvas.onWindowResize);
 
           $("#color-picker").spectrum({
@@ -356,12 +373,12 @@
          * Add lisenets                             *
          * ---------------------------------------- */
 
-        let configProcess = function () {
+        const configProcess = function () {
           matrixWidth = $("#matrix-width").val();
           matrixHeight = $("#matrix-height").val();
-          let mqttServer = $("#mqtt-server").val();
-          let mqttPort = $("#mqtt-port").val();
-          let mqttTopicPrefix = $("#mqtt-topic-prefix").val();
+          const mqttServer = $("#mqtt-server").val();
+          const mqttPort = $("#mqtt-port").val();
+          const mqttTopicPrefix = $("#mqtt-topic-prefix").val();
 
           boardInitialize();
 
@@ -378,6 +395,12 @@
           configDialog.dialog("close");
           messageDialog.dialog("open");
         };
+
+        connectionLostDialog = $("#dialog-message-connection-lost").dialog({
+          dialogClass: "no-close",
+          autoOpen: false,
+          modal: true,
+        });
 
         messageDialog = $("#dialog-message").dialog({
           dialogClass: "no-close",
@@ -494,5 +517,10 @@
     <div id="dialog-message" title="Connection">
       <div>Please wait as connection to server is being made...</div>
     </div>
+
+    <div id="dialog-message-connection-lost" title="Connection Lost">
+      <div>Connection to server lost. Refresh page to reconnect...</div>
+    </div>
+
   </body>
 </html>
