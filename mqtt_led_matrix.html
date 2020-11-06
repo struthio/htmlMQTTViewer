@@ -1,0 +1,498 @@
+<html>
+  <head>
+    <script
+      src="https://code.jquery.com/jquery-3.1.1.min.js"
+      type="text/javascript"
+    ></script>
+    <script
+      src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"
+      type="text/javascript"
+    ></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"
+      type="text/javascript"
+    ></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/spectrum/1.8.0/spectrum.min.js"></script>
+    <link
+      rel="stylesheet"
+      type="text/css"
+      href="https://code.jquery.com/ui/1.12.1/themes/dark-hive/jquery-ui.css"
+    />
+    <link
+      rel="stylesheet"
+      type="text/css"
+      href="https://cdnjs.cloudflare.com/ajax/libs/spectrum/1.8.0/spectrum.min.css"
+    />
+
+    <title>LED Matrix Controller</title>
+    <script>
+      $(document).ready(function () {
+        let configDialog, configForm;
+        let matrixWidth = 20,
+          matrixHeight = 21;
+
+        /* ---------------------------------------- *
+         * Variables                                *
+         * ---------------------------------------- */
+        let mqttConnection;
+        let boxList;
+        let boxCanvas;
+        let messageDialog;
+
+        /* ---------------------------------------- *
+         * MQTT Object                              *
+         * ---------------------------------------- */
+        class MqttConnection {
+          client;
+          connection;
+          callbackSuccess;
+
+          constructor(inHostname, inPort, inTopicPrefix, inCallbackSuccess) {
+            this.hostname = inHostname;
+            this.port = inPort;
+            this.topicPrefix = inTopicPrefix;
+            this.callbackSuccess = inCallbackSuccess;
+          }
+
+          connect = function () {
+            // Connect the client, providing an onConnect callback
+            this.client = new Paho.MQTT.Client(
+              "wss://mqtt.eclipse.org:443/mqtt",
+              this.generateClientID()
+            );
+            this.client.onMessageArrived = this.onMessageArrived;
+            this.client.onConnectionLost = this.onConnectionLost;
+
+            this.connection = this.client.connect({
+              onSuccess: this.onConnect,
+              userName: "Username",
+              password: "password",
+            });
+          };
+
+          onConnectionLost = function (responseObject) {
+            console.log("Connection Lost: " + responseObject.errorMessage);
+          };
+
+          onMessageArrived = function (message) {
+            /*
+            console.log("Message Arrived: " + message.payloadString);
+            console.log("QoS:       " + message.qos);
+            console.log("Retained:  " + message.retained);
+            // Read Only, set if message might be a duplicate sent from broker
+            console.log("Duplicate: " + message.duplicate);
+            console.log("Topic:     " + message.destinationName);
+            */
+            let ledId = message.destinationName.match(
+              /^other\/ledmatrix\/led\/([0-9]{1,3})$/
+            );
+            if (ledId !== undefined && ledId != null) {
+              boxList.setColorByBoxId(ledId[1], message.payloadString, true);
+            }
+          };
+
+          // Called when the connection is made
+          onConnect = () => {
+            console.log("Connected!");
+            let pkg = this.client.subscribe(this.topicPrefix + "led/+");
+            this.callbackSuccess();
+          };
+
+          sendMessage = (inBoxId, inColor) => {
+            const message = new Paho.MQTT.Message(inColor);
+            message.destinationName = this.topicPrefix + "led/" + inBoxId;
+            message.retained = true;
+            this.client.send(message);
+          };
+
+          generateClientID = function () {
+            return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+              /[xy]/g,
+              function (c) {
+                var r = (Math.random() * 16) | 0,
+                  v = c == "x" ? r : (r & 0x3) | 0x8;
+                return v.toString(16);
+              }
+            );
+          };
+        }
+
+        /* ---------------------------------------- *
+         * Box Class                                *
+         * ---------------------------------------- */
+        class Box {
+          constructor(
+            inBoxId,
+            inBoxX,
+            inBoxY,
+            offsetX,
+            offsetY,
+            width,
+            height
+          ) {
+            this.id = inBoxId;
+            this.X = inBoxX;
+            this.Y = inBoxY;
+            this.offsetX = offsetX;
+            this.offsetY = offsetY;
+            this.width = width;
+            this.height = height;
+            this.color = "#000000";
+            this.serverColor = "#000000";
+            this.autoSendCallback = null;
+          }
+
+          draw(inCanvas, isActive = false) {
+            inCanvas.beginPath();
+            inCanvas.fillStyle = this.color;
+            inCanvas.strokeStyle = isActive ? "#FF0000" : "#A0A0A0";
+            inCanvas.rect(this.offsetX, this.offsetY, this.width, this.height);
+            inCanvas.fill();
+            inCanvas.stroke();
+          }
+          isOver(inPositionX, inPositionY) {
+            if (
+              this.offsetX <= inPositionX &&
+              inPositionX < this.offsetX + this.width &&
+              this.offsetY <= inPositionY &&
+              inPositionY < this.offsetY + this.height
+            ) {
+              return true;
+            } else return false;
+          }
+          setColor(inColor, inPropagate = true) {
+            this.color = inColor;
+            if (this.autoSendCallback != null && inPropagate)
+              this.autoSendCallback(this.id, this.color);
+          }
+          setAutosendCallback(inCallback) {
+            this.autoSendCallback = inCallback;
+          }
+        }
+
+        /* ---------------------------------------- *
+         *  BoxList Object                          *
+         * ---------------------------------------- */
+        class BoxList {
+          boxes = [];
+          active = null;
+          boxSizeW;
+          boxSizeH;
+
+          constructor(inCanvas) {
+            this.canvas = inCanvas;
+
+            let canvasWidth = this.canvas.canvas.clientWidth;
+            let canvasHeight = this.canvas.canvas.clientHeight;
+            this.boxSizeW = Math.floor(canvasWidth / matrixWidth);
+            this.boxSizeH = Math.floor(canvasHeight / matrixHeight);
+          }
+          generateBoxes(inMatrixWidth, inMatrixHeight) {
+            for (let iCounterY = 0; iCounterY < inMatrixHeight; iCounterY++)
+              for (let iCounterX = 0; iCounterX < inMatrixWidth; iCounterX++) {
+                this.boxes.push(
+                  new Box(
+                    iCounterX + iCounterY * inMatrixWidth,
+                    iCounterX,
+                    iCounterY,
+                    this.boxSizeW * iCounterX,
+                    iCounterY * this.boxSizeH,
+                    this.boxSizeW,
+                    this.boxSizeH
+                  )
+                );
+              }
+          }
+          getBoxByPositionXY = function (inPositionX, inPositionY) {
+            for (const boxData of this.boxes)
+              if (boxData.isOver(inPositionX, inPositionY)) {
+                return boxData;
+              }
+            throw new Error(
+              "No Box found for position: " + inPositionX + "x" + inPositionY
+            );
+          };
+          drawAll = function () {
+            for (const boxData of this.boxes) {
+              boxData.draw(this.canvas);
+            }
+          };
+          sendAll = function () {
+            this.boxes
+              .filter((box) => box.color != box.serverColor)
+              .forEach((box) => mqttConnection.sendMessage(box.id, box.color));
+          };
+          setActive = function (inBox, inCanvas) {
+            if (this.active != inBox) {
+              if (this.active !== null) this.active.draw(this.canvas, false);
+              inBox.draw(this.canvas, true);
+              this.active = inBox;
+            }
+          };
+          setColorByBoxId = function (inBoxId, inColor, isServer = false) {
+            this.boxes
+              .filter((box) => box.id == inBoxId)
+              .forEach((box) => {
+                box.setColor(inColor, !isServer);
+                if (isServer) box.serverColor = inColor;
+
+                box.draw(this.canvas);
+              });
+          };
+          setAutosendCallback = function (inCallback) {
+            for (const boxData of this.boxes)
+              boxData.setAutosendCallback(inCallback);
+          };
+        }
+
+        /* ---------------------------------------- *
+         *                                          *
+         * ---------------------------------------- */
+        class CanvasPainter {
+          constructor() {
+            this.activeColor = "#FFFFFF";
+            this.canvas = document
+              .getElementsByTagName("canvas")[0]
+              .getContext("2d");
+          }
+
+          setActiveColor = (color) => {
+            this.activeColor = color.toHexString();
+          };
+
+          onMouseMove = function (e) {
+            const relativeX = e.pageX - e.currentTarget.offsetLeft; //offsetX
+            const relativeY = e.pageY - e.currentTarget.offsetTop; //offsetY
+
+            let tmpBoxPosition = boxList.getBoxByPositionXY(
+              relativeX,
+              relativeY
+            );
+            boxList.setActive(tmpBoxPosition, this.canvas);
+          };
+
+          onMouseDown = (e) => {
+            const relativeX = e.pageX - e.currentTarget.offsetLeft;
+            const relativeY = e.pageY - e.currentTarget.offsetTop;
+
+            let tmpBoxPosition = boxList.getBoxByPositionXY(
+              relativeX,
+              relativeY
+            );
+
+            tmpBoxPosition.setColor(this.activeColor);
+            tmpBoxPosition.draw(this.canvas);
+          };
+
+          onWindowResize = (e) => {
+            const documentWidth = document.documentElement.clientWidth;
+            const canvasWidth = this.canvas.canvas.clientWidth;
+            const canvasPositionLeft = Math.floor(
+              (documentWidth - canvasWidth) / 2
+            );
+            this.canvas.canvas.style.position = "absolute";
+            this.canvas.canvas.style.left = canvasPositionLeft + "px";
+
+            $("#canvas-controls").css({
+              position: "absolute",
+              left: canvasPositionLeft + canvasWidth + 10 + "px",
+            });
+          };
+
+          sizeCanvasToDocument = function (elementsWidth, elementsHeight) {
+            const documentWidth = document.documentElement.clientWidth;
+            const documentHeight = document.documentElement.clientHeight;
+
+            const canvasRatio = Math.min(
+              Math.floor(documentWidth / elementsWidth),
+              Math.floor(documentHeight / elementsHeight)
+            );
+            const canvasWidth = canvasRatio * elementsWidth;
+            const canvasHeight = canvasRatio * elementsHeight;
+
+            this.canvas.canvas.width = canvasWidth;
+            this.canvas.canvas.height = canvasHeight;
+            this.onWindowResize();
+          };
+        }
+        /* ---------------------------------------- *
+         * Initialize board                         *
+         * ---------------------------------------- */
+        let boardInitialize = function () {
+          boxCanvas = new CanvasPainter();
+          boxCanvas.sizeCanvasToDocument(matrixWidth, matrixHeight);
+
+          boxList = new BoxList(boxCanvas.canvas);
+          boxList.generateBoxes(matrixWidth, matrixHeight);
+          boxList.drawAll(canvas);
+
+          $("#canvas").mousemove(boxCanvas.onMouseMove);
+          $("#canvas").mousedown(boxCanvas.onMouseDown);
+          $(window).resize(boxCanvas.onWindowResize);
+
+          $("#color-picker").spectrum({
+            color: "#fff",
+            showInitial: true,
+            showButtons: false,
+            change: boxCanvas.setActiveColor,
+            move: boxCanvas.setActiveColor,
+          });
+          $("#send-changes").click(function (e) {
+            boxList.sendAll();
+          });
+          $("#checkbox-auto-send").change(function (e) {
+            $("#send-changes").attr("disabled", this.checked);
+            if (this.checked)
+              boxList.setAutosendCallback(mqttConnection.sendMessage);
+            else boxList.setAutosendCallback(null);
+          });
+        };
+
+        /* ---------------------------------------- *
+         * Create Objects                           *
+         * ---------------------------------------- */
+
+        /* ---------------------------------------- *
+         * Add lisenets                             *
+         * ---------------------------------------- */
+
+        let configProcess = function () {
+          matrixWidth = $("#matrix-width").val();
+          matrixHeight = $("#matrix-height").val();
+          let mqttServer = $("#mqtt-server").val();
+          let mqttPort = $("#mqtt-port").val();
+          let mqttTopicPrefix = $("#mqtt-topic-prefix").val();
+
+          boardInitialize();
+
+          mqttConnection = new MqttConnection(
+            mqttServer,
+            mqttPort,
+            mqttTopicPrefix,
+            () => {
+              messageDialog.dialog("close");
+            }
+          );
+          mqttConnection.connect();
+
+          configDialog.dialog("close");
+          messageDialog.dialog("open");
+        };
+
+        messageDialog = $("#dialog-message").dialog({
+          dialogClass: "no-close",
+          autoOpen: false,
+          modal: true,
+        });
+
+        configDialog = $("#dialog-config").dialog({
+          dialogClass: "no-close",
+          autoOpen: false,
+          height: 400,
+          width: 350,
+          modal: true,
+          buttons: {
+            "Run Application": configProcess,
+          },
+          /* close: function () {
+                       configForm[0].reset();
+                       allFields.removeClass("ui-state-error");
+                     },*/
+        });
+
+        configForm = configDialog.find("form").on("submit", function (event) {
+          event.preventDefault();
+          configProcess();
+        });
+
+        configDialog.dialog("open");
+      });
+    </script>
+    <style>
+      body {
+        height: 95%;
+      }
+      #canvas {
+        border: 1px dotted #a0a0a0;
+      }
+      #canvas-controls {
+        width: 200px;
+        border: 1px dotted #000000;
+      }
+      #canvas-controls .header {
+        color: #fff;
+        background-color: #000;
+        text-align: center;
+      }
+      .no-close .ui-dialog-titlebar-close {
+        display: none;
+      }
+    </style>
+  </head>
+  <body id="pageBody">
+    <div>
+      <canvas id="canvas"></canvas>
+      <div id="canvas-controls">
+        <div class="header">Choose color to paint with.</div>
+        <div>Color: <input id="color-picker" /></div>
+        <div class="header">
+          In order to send changes to device/other sessions click 'Send' below.
+        </div>
+        <div><button id="send-changes">Send</button></div>
+        <div><input type="checkbox" id="checkbox-auto-send" /> - Autosend</div>
+      </div>
+    </div>
+
+    <div id="dialog-config" title="Confiuration">
+      <form>
+        <fieldset>
+          <label for="matrix-width">Matrix Width:</label>
+          <div>
+            <input id="matrix-width" name="matrix-width" value="20" disabled />
+          </div>
+          <label for="matrix-height">Matrix Height:</label>
+          <div>
+            <input
+              id="matrix-height"
+              name="matrix-height"
+              value="21"
+              disabled
+            />
+          </div>
+          <label for="mqtt-server">MQTT Server Hostname:</label>
+          <div>
+            <input
+              id="mqtt-server"
+              name="mqtt-server"
+              value="iot.eclipse.org"
+            />
+          </div>
+          <label for="mqtt-port">MQTT Server Port:</label>
+          <div><input id="mqtt-port" name="mqtt-port" value="1883" /></div>
+          <label for="mqtt-topic-prefix">MQTT Topic Prefix:</label>
+          <div>
+            <input
+              id="mqtt-topic-prefix"
+              name="mqtt-topic-prefix"
+              value="other/ledmatrix/"
+              disabled
+            />
+          </div>
+          <input
+            type="submit"
+            value="Run"
+            tabindex="-1"
+            style="position: absolute; top: -1000px"
+            width="0"
+            height="0"
+          />
+        </fieldset>
+      </form>
+    </div>
+    <!--              -->
+
+    <div id="dialog-message" title="Connection">
+      <div>Please wait as connection to server is being made...</div>
+    </div>
+  </body>
+</html>
