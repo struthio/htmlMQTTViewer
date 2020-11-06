@@ -57,7 +57,7 @@
           connect = function () {
             // Connect the client, providing an onConnect callback
             this.client = new Paho.MQTT.Client(
-              "wss://mqtt.eclipse.org:443/mqtt",
+              "wss://" + this.hostname + ":" + this.port + "/mqtt",
               this.generateClientID()
             );
             this.client.onMessageArrived = this.onMessageArrived;
@@ -72,7 +72,7 @@
 
           onConnectionLost = function (responseObject) {
             console.log("Connection Lost: " + responseObject.errorMessage);
-            connectionLostDialog.dialog('open');
+            connectionLostDialog.dialog("open");
           };
 
           onMessageArrived = function (message) {
@@ -487,11 +487,11 @@
             <input
               id="mqtt-server"
               name="mqtt-server"
-              value="iot.eclipse.org"
+              value="mqtt.eclipse.org"
             />
           </div>
           <label for="mqtt-port">MQTT Server Port:</label>
-          <div><input id="mqtt-port" name="mqtt-port" value="1883" /></div>
+          <div><input id="mqtt-port" name="mqtt-port" value="443" /></div>
           <label for="mqtt-topic-prefix">MQTT Topic Prefix:</label>
           <div>
             <input
@@ -521,6 +521,5 @@
     <div id="dialog-message-connection-lost" title="Connection Lost">
       <div>Connection to server lost. Refresh page to reconnect...</div>
     </div>
-
   </body>
 </html>

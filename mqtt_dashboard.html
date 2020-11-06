@@ -39,13 +39,24 @@ $(document).ready(function()
 	{
 		chartImage = new google.visualization.LineChart(document.getElementById('chart_div'));
 	}
+	function generateClientID()
+	{
+      	return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g,
+           	function (c)
+			{
+               	var r = (Math.random() * 16) | 0,
+           		v = c == "x" ? r : (r & 0x3) | 0x8;
+           		return v.toString(16);
+        	}
+    	);
+	};
 	// --------------------------------------------------------------------------------------
 	// --------------------------------------------------------------------------------------
 	//    MQTT PART
 	// --------------------------------------------------------------------------------------
 	// --------------------------------------------------------------------------------------
 	// Create a client instance: Broker, Port, Websocket Path, Client ID
-	client = new Paho.MQTT.Client("wss://mqtt.eclipse.org:443/mqtt", "cc94c3fc-92c1-4ea7-813d-f4182009f03c");
+	client = new Paho.MQTT.Client("wss://mqtt.eclipse.org:443/mqtt", generateClientID());
  
 	// set callback handlers
 	client.onConnectionLost = function (responseObject)
